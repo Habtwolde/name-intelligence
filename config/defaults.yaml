@@ -1,0 +1,16 @@
+project_name: name_intelligence
+catalog: AUTO
+schema: name_intelligence
+volume: files
+app_name: name-intelligence-app
+warehouse_id: AUTO
+endpoint_name: AUTO
+auto_create_warehouse: false
+warehouse_size: 2X-Small
+batch_size: 20
+max_concurrent_requests: 8
+max_new_names_per_run: 100000
+review_confidence_threshold: 0.70
+prompt_version: v1
+upload_preview_rows: 5000
+
