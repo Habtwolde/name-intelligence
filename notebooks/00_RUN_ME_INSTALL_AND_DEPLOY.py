@@ -377,7 +377,7 @@ principal = service_principal.replace("`", "``")
 grants = [
     f"GRANT USE CATALOG ON CATALOG `{TARGET_CATALOG}` TO `{principal}`",
     f"GRANT USE SCHEMA ON SCHEMA `{TARGET_CATALOG}`.`{TARGET_SCHEMA}` TO `{principal}`",
-    f"GRANT SELECT, MODIFY ON ALL TABLES IN SCHEMA `{TARGET_CATALOG}`.`{TARGET_SCHEMA}` TO `{principal}`",
+    f"GRANT SELECT, MODIFY ON SCHEMA `{TARGET_CATALOG}`.`{TARGET_SCHEMA}` TO `{principal}`",
     f"GRANT READ VOLUME, WRITE VOLUME ON VOLUME `{TARGET_CATALOG}`.`{TARGET_SCHEMA}`.`{VOLUME_NAME}` TO `{principal}`",
 ]
 for statement in grants:
