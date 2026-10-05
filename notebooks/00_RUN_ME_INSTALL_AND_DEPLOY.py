@@ -360,10 +360,10 @@ def update_permission(object_type: str, object_id: str, permission: str) -> None
 
 update_permission("warehouses", WAREHOUSE_ID, "CAN_USE")
 endpoint = w.api_client.do("GET", f"/api/2.0/serving-endpoints/{ENDPOINT_NAME}")
-endpoint_id = endpoint.get("id")
-if not endpoint_id:
-    raise RuntimeError(f"Serving endpoint {ENDPOINT_NAME!r} did not return an ID.")
-update_permission("serving-endpoints", endpoint_id, "CAN_QUERY")
+# Provisioned/custom endpoints can expose an ID. Pay-per-token foundation-model
+# endpoints use their endpoint name as the Permissions API object identifier.
+endpoint_permission_id = endpoint.get("id") or endpoint.get("name") or ENDPOINT_NAME
+update_permission("serving-endpoints", endpoint_permission_id, "CAN_QUERY")
 update_permission("jobs", str(job_id), "CAN_MANAGE_RUN")
 
 principal = service_principal.replace("`", "``")
