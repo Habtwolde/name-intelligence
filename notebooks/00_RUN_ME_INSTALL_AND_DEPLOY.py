@@ -36,7 +36,16 @@ ENDPOINT_NAME = REQUIRED_ENDPOINT_NAME
 AUTO_CREATE_WAREHOUSE = widget("auto_create_warehouse", "false", "Create a small serverless warehouse if none exists").lower() == "true"
 WAREHOUSE_SIZE = widget("warehouse_size", "2X-Small", "New warehouse size")
 BATCH_SIZE = int(widget("batch_size", "20", "Names per LLM request"))
-MAX_CONCURRENCY = int(widget("max_concurrent_requests", "8", "Concurrent endpoint requests"))
+CONFIGURED_MAX_CONCURRENCY = int(widget("max_concurrent_requests", "1", "Concurrent endpoint requests"))
+# Llama pay-per-token endpoints reserve max_tokens for every in-flight request.
+# Keep the portable installer at one request so legacy widget values cannot
+# exceed a client's output-token-per-minute quota.
+MAX_CONCURRENCY = 1
+if CONFIGURED_MAX_CONCURRENCY != MAX_CONCURRENCY:
+    print(
+        f"Replacing legacy concurrency {CONFIGURED_MAX_CONCURRENCY} with "
+        f"the Llama-safe value {MAX_CONCURRENCY}."
+    )
 MAX_NEW_NAMES = int(widget("max_new_names_per_run", "100000", "Maximum new names per run"))
 RUN_TEST = widget("run_acceptance_test", "true", "Run bundled acceptance test").lower() == "true"
 
