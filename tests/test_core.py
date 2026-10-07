@@ -13,7 +13,7 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from name_intelligence.detection import detect_name_columns, selected_columns
 from name_intelligence.normalization import normalize_name, search_key, stable_name_hash
-from name_intelligence.prompting import build_user_prompt
+from name_intelligence.prompting import PROMPT_VERSION, SYSTEM_PROMPT, build_user_prompt
 from name_intelligence.validation import validate_analysis
 
 
@@ -57,3 +57,9 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(json.loads(prompt)["names"], ["MOHAMMAD", "DÍAZ"])
         with self.assertRaises(ValueError):
             build_user_prompt([str(i) for i in range(26)])
+
+    def test_cognate_prompt_requires_reciprocal_family_reasoning(self):
+        self.assertEqual(PROMPT_VERSION, "v2")
+        self.assertIn("This relationship is reciprocal", SYSTEM_PROMPT)
+        prompt = build_user_prompt(["YOSEPH"])
+        self.assertIn("query direction must not change", prompt)
