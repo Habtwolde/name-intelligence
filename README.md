@@ -52,7 +52,7 @@ does not permit one of these actions. The installer does not circumvent policy.
 | `target_catalog` | `AUTO` | Uses the notebook's current catalog. |
 | `target_schema` | `name_intelligence` | Created if missing. |
 | `warehouse_id` | `AUTO` | Selects an accessible running warehouse. |
-| `endpoint_name` | `databricks-meta-llama-3-3-70b-instruct` | Requires Databricks-hosted Meta Llama 3.3 70B Instruct. An existing `AUTO` widget value resolves to this endpoint. |
+| `endpoint_name` | `databricks-meta-llama-3-3-70b-instruct` | Requires Databricks-hosted Meta Llama 3.3 70B Instruct. Any legacy widget value is migrated automatically. |
 | `auto_create_warehouse` | `false` | When enabled, creates a small serverless warehouse only if none exists. |
 | `batch_size` | `20` | Names per endpoint request; allowed range 1–25. |
 | `max_concurrent_requests` | `8` | Endpoint calls in flight. |
