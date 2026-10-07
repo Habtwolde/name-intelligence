@@ -171,6 +171,18 @@ CREATE TABLE IF NOT EXISTS `{TARGET_CATALOG}`.`{TARGET_SCHEMA}`.`name_analysis_c
 ) USING DELTA
 """,
 f"""
+CREATE TABLE IF NOT EXISTS `{TARGET_CATALOG}`.`{TARGET_SCHEMA}`.`single_name_analysis_cache` (
+  cache_key STRING NOT NULL,
+  name_hash STRING NOT NULL,
+  normalized_name STRING NOT NULL,
+  requested_context STRING,
+  response_json STRING,
+  model_endpoint STRING,
+  prompt_version STRING,
+  processed_at TIMESTAMP
+) USING DELTA
+""",
+f"""
 CREATE TABLE IF NOT EXISTS `{TARGET_CATALOG}`.`{TARGET_SCHEMA}`.`name_families` (
   family_id STRING NOT NULL,
   canonical_name STRING,

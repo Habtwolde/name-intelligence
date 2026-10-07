@@ -13,7 +13,15 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from name_intelligence.detection import detect_name_columns, selected_columns
 from name_intelligence.normalization import normalize_name, search_key, stable_name_hash
-from name_intelligence.prompting import PROMPT_VERSION, SYSTEM_PROMPT, build_user_prompt
+from name_intelligence.prompting import (
+    PROMPT_VERSION,
+    SINGLE_PROMPT_VERSION,
+    SINGLE_NAME_SYSTEM_PROMPT,
+    SYSTEM_PROMPT,
+    build_single_name_prompt,
+    build_user_prompt,
+    single_name_response_schema,
+)
 from name_intelligence.validation import validate_analysis
 
 
@@ -65,3 +73,15 @@ class CoreTests(unittest.TestCase):
         self.assertIn("Generic phrases", SYSTEM_PROMPT)
         prompt = build_user_prompt(["YOSEPH"])
         self.assertIn("query direction must not change", prompt)
+
+    def test_single_name_prompt_is_rich_without_changing_batch_version(self):
+        self.assertEqual(PROMPT_VERSION, "v3")
+        self.assertEqual(SINGLE_PROMPT_VERSION, "v4-rich-single")
+        self.assertIn("native-script form", SINGLE_NAME_SYSTEM_PROMPT)
+        self.assertIn("shares only one productive morpheme", SINGLE_NAME_SYSTEM_PROMPT)
+        prompt = json.loads(build_single_name_prompt("HABTAMU", "Amharic context"))
+        self.assertEqual(prompt["name"], "HABTAMU")
+        self.assertEqual(prompt["optional_context"], "Amharic context")
+        item = single_name_response_schema()["properties"]["items"]["items"]
+        self.assertIn("meaning_and_etymology", item["required"])
+        self.assertIn("coverage_notes", item["required"])

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -20,7 +21,16 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from name_intelligence.detection import detect_name_columns, selected_columns
 from name_intelligence.normalization import normalize_name, stable_name_hash
-from name_intelligence.prompting import PROMPT_VERSION, SYSTEM_PROMPT, build_user_prompt, response_schema
+from name_intelligence.prompting import (
+    PROMPT_VERSION,
+    SINGLE_PROMPT_VERSION,
+    SINGLE_NAME_SYSTEM_PROMPT,
+    SYSTEM_PROMPT,
+    build_single_name_prompt,
+    build_user_prompt,
+    response_schema,
+    single_name_response_schema,
+)
 from name_intelligence.validation import validate_analysis
 
 
@@ -89,17 +99,23 @@ def execute(statement: str, parameters: list | None = None) -> None:
             cursor.execute(statement, parameters=parameters or [])
 
 
-def model_query(names: list[str], context: str = "") -> list[dict]:
+def model_query(names: list[str], context: str = "", rich_single: bool = False) -> list[dict]:
+    if rich_single and len(names) != 1:
+        raise ValueError("Rich single-name analysis accepts exactly one name")
     payload = {
         "messages": [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": build_user_prompt(names, context)},
+            {"role": "system", "content": SINGLE_NAME_SYSTEM_PROMPT if rich_single else SYSTEM_PROMPT},
+            {"role": "user", "content": build_single_name_prompt(names[0], context) if rich_single else build_user_prompt(names, context)},
         ],
         "temperature": 0.1,
-        "max_tokens": max(1200, 750 * len(names)),
+        "max_tokens": 4000 if rich_single else max(1200, 750 * len(names)),
         "response_format": {
             "type": "json_schema",
-            "json_schema": {"name": "name_analysis", "strict": True, "schema": response_schema()},
+            "json_schema": {
+                "name": "rich_name_analysis" if rich_single else "name_analysis",
+                "strict": True,
+                "schema": single_name_response_schema() if rich_single else response_schema(),
+            },
         },
     }
     try:
@@ -127,28 +143,32 @@ def model_query(names: list[str], context: str = "") -> list[dict]:
     return output
 
 
-def cache_single_result(normalized: str, result: dict) -> None:
+def single_cache_key(normalized: str, context: str) -> str:
+    value = "\0".join(
+        [normalized, context.strip().casefold(), ENDPOINT, SINGLE_PROMPT_VERSION]
+    )
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def cache_single_result(normalized: str, context: str, result: dict) -> None:
     response_json = json.dumps(result, ensure_ascii=False, separators=(",", ":"))
     execute(
         f"""
-        MERGE INTO `{CATALOG}`.`{SCHEMA}`.`name_analysis_cache` t
-        USING (SELECT ? AS name_hash, ? AS normalized_name) s
-        ON t.name_hash=s.name_hash
+        MERGE INTO `{CATALOG}`.`{SCHEMA}`.`single_name_analysis_cache` t
+        USING (SELECT ? AS cache_key, ? AS name_hash, ? AS normalized_name) s
+        ON t.cache_key=s.cache_key
         WHEN MATCHED THEN UPDATE SET
-          normalized_name=s.normalized_name, response_json=?, primary_name_tradition=?, confidence=?,
-          review_required=?, status='SUCCESS', model_endpoint=?, prompt_version=?,
-          processed_at=current_timestamp(), error_message=NULL
+          normalized_name=s.normalized_name, requested_context=?, response_json=?,
+          model_endpoint=?, prompt_version=?, processed_at=current_timestamp()
         WHEN NOT MATCHED THEN INSERT (
-          name_hash, normalized_name, family_id, response_json, primary_name_tradition, confidence,
-          review_required, status, model_endpoint, prompt_version, processed_at, error_message
-        ) VALUES (s.name_hash, s.normalized_name, NULL, ?, ?, ?, ?, 'SUCCESS', ?, ?, current_timestamp(), NULL)
+          cache_key, name_hash, normalized_name, requested_context, response_json,
+          model_endpoint, prompt_version, processed_at
+        ) VALUES (s.cache_key, s.name_hash, s.normalized_name, ?, ?, ?, ?, current_timestamp())
         """,
         [
-            stable_name_hash(normalized), normalized,
-            response_json, result.get("primary_name_tradition", "Unknown"), float(result.get("confidence", 0)),
-            bool(result.get("review_required", False)), ENDPOINT, ACTIVE_PROMPT_VERSION,
-            response_json, result.get("primary_name_tradition", "Unknown"), float(result.get("confidence", 0)),
-            bool(result.get("review_required", False)), ENDPOINT, ACTIVE_PROMPT_VERSION,
+            single_cache_key(normalized, context), stable_name_hash(normalized), normalized,
+            context.strip(), response_json, ENDPOINT, SINGLE_PROMPT_VERSION,
+            context.strip(), response_json, ENDPOINT, SINGLE_PROMPT_VERSION,
         ],
     )
 
@@ -193,7 +213,8 @@ def render_relationships(result: dict) -> None:
         st.markdown(f"#### {label}")
         values = grouped.get(kind, [])[:5]
         if not values:
-            st.caption("No sufficiently reliable result returned.")
+            coverage = result.get("coverage_notes", {}).get(kind, "")
+            st.caption(coverage or f"No well-attested {label.lower()} were identified.")
             continue
         for value in values:
             st.markdown(
@@ -276,22 +297,27 @@ with single_tab:
     st.subheader("Explore one name")
     name = st.text_input("Name", placeholder="Example: Mohammad")
     context = st.text_input("Optional context", placeholder="Example: Arabic-speaking context")
+    refresh = st.checkbox(
+        "Refresh with a new Llama 70B analysis",
+        help="Bypass the saved single-name result and replace it with a fresh analysis.",
+    )
     if st.button("Analyze name", type="primary", disabled=not name.strip()):
         normalized = normalize_name(name)
-        cached = query_frame(
-            f"SELECT response_json FROM `{CATALOG}`.`{SCHEMA}`.`name_analysis_cache` "
-            "WHERE name_hash = ? AND status = 'SUCCESS' AND model_endpoint = ? AND prompt_version = ? "
-            "ORDER BY processed_at DESC LIMIT 1",
-            [stable_name_hash(normalized), ENDPOINT, ACTIVE_PROMPT_VERSION],
-        )
+        cached = pd.DataFrame()
+        if not refresh:
+            cached = query_frame(
+                f"SELECT response_json FROM `{CATALOG}`.`{SCHEMA}`.`single_name_analysis_cache` "
+                "WHERE cache_key = ? ORDER BY processed_at DESC LIMIT 1",
+                [single_cache_key(normalized, context)],
+            )
         if not cached.empty:
             result = json.loads(cached.iloc[0]["response_json"])
             result["input_name"] = normalized
-            st.caption("Returned from the reusable analysis cache.")
+            st.caption("Returned from the detailed single-name cache.")
         else:
-            with st.spinner("Analyzing linguistic name associations..."):
-                result = model_query([normalized], context)[0]
-                cache_single_result(normalized, result)
+            with st.spinner("Building a detailed cultural and linguistic analysis..."):
+                result = model_query([normalized], context, rich_single=True)[0]
+                cache_single_result(normalized, context, result)
 
         st.markdown(f"### {result['input_name']}")
         left, right, third = st.columns(3)
@@ -299,6 +325,15 @@ with single_tab:
         right.metric("Primary tradition", result.get("primary_name_tradition", "Unknown"))
         third.metric("Confidence", f"{result.get('confidence', 0):.0%}")
         st.info(result.get("summary", "No summary returned."))
+        if result.get("meaning_and_etymology"):
+            st.markdown("#### Meaning and etymology")
+            st.write(result["meaning_and_etymology"])
+        if result.get("cultural_usage"):
+            st.markdown("#### Cultural usage")
+            st.write(result["cultural_usage"])
+        if result.get("pronunciation_note"):
+            st.markdown("#### Pronunciation")
+            st.write(result["pronunciation_note"])
         if result.get("ambiguity_note"):
             st.warning(result["ambiguity_note"])
         render_relationships(result)
