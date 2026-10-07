@@ -4,3 +4,16 @@ command:
   - app/app.py
   - --server.address=0.0.0.0
   - --server.port=8000
+env:
+  - name: NI_VOLUME_PATH
+    valueFrom: project-volume
+  - name: NI_WAREHOUSE_ID
+    valueFrom: sql-warehouse
+  - name: NI_ENDPOINT
+    valueFrom: serving-endpoint
+  - name: NI_JOB_ID
+    valueFrom: batch-job
+  - name: NI_BATCH_SIZE
+    value: "20"
+  - name: NI_PROMPT_VERSION
+    value: "v3"
