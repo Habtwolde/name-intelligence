@@ -45,3 +45,4 @@ class PackageTests(unittest.TestCase):
             self.assertIn(f"valueFrom: {resource_key}", manifest)
             self.assertIn(f'"name": "{resource_key}"', installer)
         self.assertIn('"resources": app_resources', installer)
+        self.assertIn('"update_mask": "description,resources"', installer)
