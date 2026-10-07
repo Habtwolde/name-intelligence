@@ -12,7 +12,7 @@ follow-up questions, and never claims that a name proves a person's identity.
 - Uses Spark for ingestion, unpivoting, normalization and deduplication.
 - Sends only unresolved unique names to the model endpoint.
 - Batches up to 25 names per request to amortize prompt overhead.
-- Reuses exact results and high-confidence name-family members only when the model endpoint and prompt version match.
+- Reuses exact results and high-confidence name-family members.
 - Processes high-frequency names first and caps new names per run.
 - Saves every result, explanation, failure and model/prompt version in Delta.
 - Exports enriched row-level results back to the managed project volume.
@@ -52,16 +52,17 @@ does not permit one of these actions. The installer does not circumvent policy.
 | `target_catalog` | `AUTO` | Uses the notebook's current catalog. |
 | `target_schema` | `name_intelligence` | Created if missing. |
 | `warehouse_id` | `AUTO` | Selects an accessible running warehouse. |
-| `endpoint_name` | `databricks-meta-llama-3-3-70b-instruct` | Requires Databricks-hosted Meta Llama 3.3 70B Instruct. Any legacy widget value is migrated automatically. |
+| `endpoint_name` | `databricks-meta-llama-3-3-70b-instruct` | The installer enforces this Llama 3.3 70B endpoint. |
 | `auto_create_warehouse` | `false` | When enabled, creates a small serverless warehouse only if none exists. |
 | `batch_size` | `20` | Names per endpoint request; allowed range 1–25. |
-| `max_concurrent_requests` | `1` | Llama-safe endpoint calls in flight; legacy higher widget values are reduced automatically. |
+| `max_concurrent_requests` | `1` | Endpoint calls in flight; kept at one to stay within pay-per-token output quotas. |
 | `max_new_names_per_run` | `100000` | Cost circuit breaker. |
 | `run_acceptance_test` | `true` | Runs the included 30-row test file. |
 
-Selections are written into deployment-time environment variables. The source
-code and ZIP never contain a workspace, warehouse, job, application, endpoint,
-volume, or service-principal ID from another environment.
+The installer attaches the selected warehouse, endpoint, job, and volume as
+Databricks App resources. `app.yaml` resolves their workspace-specific values at
+runtime, so the source code never contains another environment's workspace,
+warehouse, job, application, volume, or service-principal ID.
 
 ## Million-row cost controls
 
@@ -76,7 +77,7 @@ The pipeline never invokes the LLM for all `R` rows. It also:
 
 - Orders unresolved names by source frequency.
 - Stops at the configured new-name ceiling.
-- Caps Llama output-token reservations, uses one in-flight request, and automatically splits a batch when a complete JSON response does not fit.
+- Retries transient endpoint failures up to four times.
 - Flushes results incrementally so an interruption does not discard completed work.
 - Reuses family templates only for members recorded at confidence 0.85 or higher.
 - Generates short stored rationales once; follow-up chat is invoked only on demand.
@@ -121,11 +122,8 @@ name-intelligence/
   million-row result into application memory.
 - Re-running an existing `run_id` replaces that run's staged rows and skips
   already-successful cached names.
-- The app requires the Databricks-hosted `databricks-meta-llama-3-3-70b-instruct`
-  endpoint. The installer verifies access before changing the job or app deployment.
-- Prompt v3 treats well-supported cultural cognates as reciprocal, requires substantive
-  relationship explanations, actively checks known culture-specific nicknames for given
-  names, and refreshes older cached analyses when encountered.
+- The required `databricks-meta-llama-3-3-70b-instruct` endpoint must be
+  available in the target workspace region and queryable by the installer.
 - Names are personal data. Use appropriate workspace access, retention and
   client governance rules. Do not use name-tradition associations to make
   employment, eligibility, fraud, credit, healthcare or similar decisions.
