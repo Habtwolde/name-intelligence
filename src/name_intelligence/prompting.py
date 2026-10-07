@@ -14,7 +14,7 @@ RELATIONSHIP_TYPES = {
     "nickname",
 }
 
-PROMPT_VERSION = "v2"
+PROMPT_VERSION = "v3"
 
 
 def response_schema() -> dict:
@@ -26,7 +26,7 @@ def response_schema() -> dict:
             "name": {"type": "string"},
             "relationship_type": {"type": "string", "enum": sorted(RELATIONSHIP_TYPES)},
             "cultural_context": {"type": "string"},
-            "why": {"type": "string"},
+            "why": {"type": "string", "minLength": 40, "maxLength": 220},
             "confidence": {"type": "number", "minimum": 0, "maximum": 1},
         },
     }
@@ -68,7 +68,9 @@ SYSTEM_PROMPT = """You are a culturally aware onomastics assistant. Analyze the 
 
 For cultural cognates, first identify the underlying etymological name family, then return the strongest well-attested forms used in other languages or naming traditions. A cognate shares an etymological root and need not sound the same. This relationship is reciprocal: if A is a cognate of B, analyzing B should also return A when culturally relevant. Do not omit a cross-tradition cognate merely because one side is an uncommon spelling or reaches the shared root through a canonical, orthographic, or transliterated form. For example, Yoseph and Yousef belong to Hebrew and Arabic branches of the Joseph/Yosef/Yusuf name family and should be considered cultural cognates in either query direction, with a culture-specific explanation.
 
-Return up to five useful, defensible entries for each relationship type rather than only the single safest candidate. Do not invent a nickname for a surname. Keep every reason factual and under 28 words. If a particular relationship is genuinely weak, omit it or lower its confidence; reserve unknown and review_required for materially ambiguous overall analyses."""
+For every relationship, why must provide a concrete explanation: name the shared source form or linguistic mechanism and explain how it connects the two names in the stated culture. Generic phrases such as "shared etymological root," "variant spelling," or "same pronunciation" by themselves are invalid. For given names, actively return well-attested culture-specific diminutives or informal forms when they exist. For the Yosef/Joseph family, Yossi or Yosi is a well-attested Hebrew nickname. Do not invent nicknames, and do not return nicknames for surnames.
+
+Return up to five useful, defensible entries for each relationship type rather than only the single safest candidate. Keep every reason factual and between 8 and 32 words. If a particular relationship is genuinely weak, omit it or lower its confidence; reserve unknown and review_required for materially ambiguous overall analyses."""
 
 
 def build_user_prompt(names: Sequence[str], optional_context: str = "") -> str:
@@ -85,6 +87,8 @@ def build_user_prompt(names: Sequence[str], optional_context: str = "") -> str:
             "Explain why each relationship applies in its specific cultural context.",
             "For cultural_cognate, reason from the shared etymological family and include strong cross-language or cross-tradition forms even when the input spelling is uncommon.",
             "Treat cultural_cognate as reciprocal: query direction must not change whether a well-supported same-root relationship is returned.",
+            "Every why must identify the specific linguistic, historical, orthographic, phonetic, or usage-based connection; generic labels are not explanations.",
+            "For a given name, actively include well-attested culture-specific nicknames or diminutives when they exist.",
             "Preserve the input spelling in input_name.",
         ],
     }
