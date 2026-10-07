@@ -8,7 +8,7 @@ endpoint_name: databricks-meta-llama-3-3-70b-instruct
 auto_create_warehouse: false
 warehouse_size: 2X-Small
 batch_size: 20
-max_concurrent_requests: 8
+max_concurrent_requests: 1
 max_new_names_per_run: 100000
 review_confidence_threshold: 0.70
 prompt_version: v3
