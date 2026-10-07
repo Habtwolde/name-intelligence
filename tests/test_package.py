@@ -46,3 +46,4 @@ class PackageTests(unittest.TestCase):
             self.assertIn(f'"name": "{resource_key}"', installer)
         self.assertIn('"resources": app_resources', installer)
         self.assertIn('"update_mask": "description,resources"', installer)
+        self.assertNotIn("did not return an ID", installer)
