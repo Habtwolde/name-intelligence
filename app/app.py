@@ -20,7 +20,7 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from name_intelligence.detection import detect_name_columns, selected_columns
 from name_intelligence.normalization import normalize_name, stable_name_hash
-from name_intelligence.prompting import SYSTEM_PROMPT, build_user_prompt, response_schema
+from name_intelligence.prompting import PROMPT_VERSION, SYSTEM_PROMPT, build_user_prompt, response_schema
 from name_intelligence.validation import validate_analysis
 
 
@@ -38,6 +38,7 @@ WAREHOUSE_ID = env("NI_WAREHOUSE_ID")
 ENDPOINT = env("NI_ENDPOINT")
 JOB_ID = env("NI_JOB_ID")
 BATCH_SIZE = int(env("NI_BATCH_SIZE", "20"))
+ACTIVE_PROMPT_VERSION = env("NI_PROMPT_VERSION", PROMPT_VERSION)
 
 
 @st.cache_resource
@@ -126,19 +127,19 @@ def cache_single_result(normalized: str, result: dict) -> None:
         ON t.name_hash=s.name_hash
         WHEN MATCHED THEN UPDATE SET
           normalized_name=s.normalized_name, response_json=?, primary_name_tradition=?, confidence=?,
-          review_required=?, status='SUCCESS', model_endpoint=?, prompt_version='v1',
+          review_required=?, status='SUCCESS', model_endpoint=?, prompt_version=?,
           processed_at=current_timestamp(), error_message=NULL
         WHEN NOT MATCHED THEN INSERT (
           name_hash, normalized_name, family_id, response_json, primary_name_tradition, confidence,
           review_required, status, model_endpoint, prompt_version, processed_at, error_message
-        ) VALUES (s.name_hash, s.normalized_name, NULL, ?, ?, ?, ?, 'SUCCESS', ?, 'v1', current_timestamp(), NULL)
+        ) VALUES (s.name_hash, s.normalized_name, NULL, ?, ?, ?, ?, 'SUCCESS', ?, ?, current_timestamp(), NULL)
         """,
         [
             stable_name_hash(normalized), normalized,
             response_json, result.get("primary_name_tradition", "Unknown"), float(result.get("confidence", 0)),
-            bool(result.get("review_required", False)), ENDPOINT,
+            bool(result.get("review_required", False)), ENDPOINT, ACTIVE_PROMPT_VERSION,
             response_json, result.get("primary_name_tradition", "Unknown"), float(result.get("confidence", 0)),
-            bool(result.get("review_required", False)), ENDPOINT,
+            bool(result.get("review_required", False)), ENDPOINT, ACTIVE_PROMPT_VERSION,
         ],
     )
 
@@ -270,8 +271,9 @@ with single_tab:
         normalized = normalize_name(name)
         cached = query_frame(
             f"SELECT response_json FROM `{CATALOG}`.`{SCHEMA}`.`name_analysis_cache` "
-            "WHERE name_hash = ? AND status = 'SUCCESS' ORDER BY processed_at DESC LIMIT 1",
-            [stable_name_hash(normalized)],
+            "WHERE name_hash = ? AND status = 'SUCCESS' AND model_endpoint = ? AND prompt_version = ? "
+            "ORDER BY processed_at DESC LIMIT 1",
+            [stable_name_hash(normalized), ENDPOINT, ACTIVE_PROMPT_VERSION],
         )
         if not cached.empty:
             result = json.loads(cached.iloc[0]["response_json"])
