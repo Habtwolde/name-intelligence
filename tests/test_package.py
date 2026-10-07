@@ -47,3 +47,5 @@ class PackageTests(unittest.TestCase):
         self.assertIn('"resources": app_resources', installer)
         self.assertIn('"update_mask": "description,resources"', installer)
         self.assertNotIn("did not return an ID", installer)
+        self.assertIn("GRANT SELECT, MODIFY ON SCHEMA", installer)
+        self.assertNotIn("ON ALL TABLES IN SCHEMA", installer)
