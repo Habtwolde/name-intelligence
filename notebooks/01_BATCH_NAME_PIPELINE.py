@@ -257,7 +257,7 @@ def extract_content(response: dict) -> str:
     return text.strip()
 
 
-def call_endpoint(batch: list[dict]) -> list[dict]:
+def call_endpoint_once(batch: list[dict]) -> list[dict]:
     names = [item["normalized_name"] for item in batch]
     payload = {
         "messages": [
@@ -265,18 +265,26 @@ def call_endpoint(batch: list[dict]) -> list[dict]:
             {"role": "user", "content": build_user_prompt(names)},
         ],
         "temperature": 0.1,
-        "max_tokens": max(1600, 750 * len(names)),
+        # Llama 3.3 70B has a materially smaller output allowance than Claude.
+        # Cap the reservation below the model output limit and split below if
+        # the response still cannot fit or be parsed as one complete JSON object.
+        "max_tokens": min(8000, max(1600, 1000 * len(names))),
         "response_format": {
             "type": "json_schema",
             "json_schema": {"name": "name_analysis", "strict": True, "schema": response_schema()},
         },
     }
     last_error = None
-    for attempt in range(4):
+    for attempt in range(3):
         try:
             response = w.api_client.do("POST", f"/serving-endpoints/{ENDPOINT}/invocations", body=payload)
             parsed = json.loads(extract_content(response))
             items = parsed.get("items", parsed if isinstance(parsed, list) else [])
+            if not isinstance(items, list) or len(items) != len(batch):
+                raise ValueError(
+                    f"Endpoint returned {len(items) if isinstance(items, list) else 0} "
+                    f"items for a batch of {len(batch)} names"
+                )
             output = []
             for index, source_item in enumerate(batch):
                 raw = items[index] if index < len(items) and isinstance(items[index], dict) else {}
@@ -287,8 +295,16 @@ def call_endpoint(batch: list[dict]) -> list[dict]:
             last_error = exc
             if attempt == 0:
                 payload.pop("response_format", None)
-            time.sleep(min(30, 2 ** attempt))
+            time.sleep(min(8, 2 ** attempt))
     return [{"source": item, "analysis": None, "issues": [], "error": str(last_error)} for item in batch]
+
+
+def call_endpoint(batch: list[dict]) -> list[dict]:
+    results = call_endpoint_once(batch)
+    if len(batch) > 1 and results and all(result["error"] for result in results):
+        midpoint = len(batch) // 2
+        return call_endpoint(batch[:midpoint]) + call_endpoint(batch[midpoint:])
+    return results
 
 
 def family_id_for(name: str, analysis: dict) -> str:
