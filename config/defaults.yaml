@@ -11,6 +11,6 @@ batch_size: 20
 max_concurrent_requests: 8
 max_new_names_per_run: 100000
 review_confidence_threshold: 0.70
-prompt_version: v2
+prompt_version: v3
 upload_preview_rows: 5000
 
