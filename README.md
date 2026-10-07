@@ -123,8 +123,9 @@ name-intelligence/
   already-successful cached names.
 - The app requires the Databricks-hosted `databricks-meta-llama-3-3-70b-instruct`
   endpoint. The installer verifies access before changing the job or app deployment.
-- Prompt v2 treats well-supported cultural cognates as reciprocal and automatically
-  refreshes older cached analyses when a name is searched or processed again.
+- Prompt v3 treats well-supported cultural cognates as reciprocal, requires substantive
+  relationship explanations, actively checks known culture-specific nicknames for given
+  names, and refreshes older cached analyses when encountered.
 - Names are personal data. Use appropriate workspace access, retention and
   client governance rules. Do not use name-tradition associations to make
   employment, eligibility, fraud, credit, healthcare or similar decisions.
