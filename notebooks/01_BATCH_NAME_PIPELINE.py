@@ -41,7 +41,6 @@ SELECTED_COLUMNS = json.loads(get_parameter("selected_columns_json", "[]"))
 BATCH_SIZE = int(get_parameter("batch_size", "20"))
 MAX_CONCURRENCY = int(get_parameter("max_concurrent_requests", "8"))
 MAX_NEW_NAMES = int(get_parameter("max_new_names", "100000"))
-PROMPT_VERSION = "v1"
 
 if not all([CATALOG, SCHEMA, VOLUME, ENDPOINT, RUN_ID, INPUT_PATH]):
     raise ValueError("catalog, schema, volume, endpoint, run_id, and input_path are required")
@@ -54,7 +53,7 @@ sys.path.insert(0, f"{local_root}/src")
 from name_intelligence.batching import chunked
 from name_intelligence.detection import detect_name_columns, selected_columns
 from name_intelligence.normalization import normalize_name, search_key, stable_name_hash
-from name_intelligence.prompting import SYSTEM_PROMPT, build_user_prompt, response_schema
+from name_intelligence.prompting import PROMPT_VERSION, SYSTEM_PROMPT, build_user_prompt, response_schema
 from name_intelligence.validation import validate_analysis
 
 
@@ -180,13 +179,20 @@ try:
 
     # Reuse a previously validated family whenever the new spelling already
     # appears as a high-confidence family member.
+    def successful_cache_hashes():
+        return (
+            spark.table(f"{CATALOG}.{SCHEMA}.name_analysis_cache")
+            .filter(
+                (F.col("status") == "SUCCESS")
+                & (F.col("model_endpoint") == ENDPOINT)
+                & (F.col("prompt_version") == PROMPT_VERSION)
+            )
+            .select("name_hash")
+        )
+
     uncached = (
         aggregate.alias("r")
-        .join(
-            spark.table(f"{CATALOG}.{SCHEMA}.name_analysis_cache").filter("status = 'SUCCESS'").select("name_hash"),
-            "name_hash",
-            "left_anti",
-        )
+        .join(successful_cache_hashes(), "name_hash", "left_anti")
     )
     family_candidates = (
         uncached.alias("r")
@@ -195,7 +201,16 @@ try:
             F.col("r.search_key") == F.col("m.member_search_key"),
             "inner",
         )
-        .join(spark.table(f"{CATALOG}.{SCHEMA}.name_families").alias("f"), "family_id", "inner")
+        .join(
+            spark.table(f"{CATALOG}.{SCHEMA}.name_families")
+            .filter(
+                (F.col("model_endpoint") == ENDPOINT)
+                & (F.col("prompt_version") == PROMPT_VERSION)
+            )
+            .alias("f"),
+            "family_id",
+            "inner",
+        )
         .select(
             F.col("r.name_hash"), F.col("r.normalized_name"), "family_id",
             F.col("f.response_template_json").alias("response_json"),
@@ -211,22 +226,16 @@ try:
         family_candidates.createOrReplaceTempView("ni_family_reuse")
         spark.sql(f"""
         MERGE INTO {TABLE('name_analysis_cache')} t USING ni_family_reuse s ON t.name_hash=s.name_hash
-        WHEN NOT MATCHED THEN INSERT *
+        WHEN MATCHED THEN UPDATE SET * WHEN NOT MATCHED THEN INSERT *
         """)
 
     cached_names = (
-        aggregate.select("name_hash").join(
-            spark.table(f"{CATALOG}.{SCHEMA}.name_analysis_cache").filter("status='SUCCESS'").select("name_hash"),
-            "name_hash", "inner"
-        ).count()
+        aggregate.select("name_hash").join(successful_cache_hashes(), "name_hash", "inner").count()
     )
     update_run(cached_names=cached_names)
 
     unresolved = (
-        aggregate.join(
-            spark.table(f"{CATALOG}.{SCHEMA}.name_analysis_cache").filter("status='SUCCESS'").select("name_hash"),
-            "name_hash", "left_anti"
-        )
+        aggregate.join(successful_cache_hashes(), "name_hash", "left_anti")
         .orderBy(F.desc("frequency"), F.asc("normalized_name"))
         .limit(MAX_NEW_NAMES)
     )
