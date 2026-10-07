@@ -59,7 +59,9 @@ class CoreTests(unittest.TestCase):
             build_user_prompt([str(i) for i in range(26)])
 
     def test_cognate_prompt_requires_reciprocal_family_reasoning(self):
-        self.assertEqual(PROMPT_VERSION, "v2")
+        self.assertEqual(PROMPT_VERSION, "v3")
         self.assertIn("This relationship is reciprocal", SYSTEM_PROMPT)
+        self.assertIn("Yossi or Yosi", SYSTEM_PROMPT)
+        self.assertIn("Generic phrases", SYSTEM_PROMPT)
         prompt = build_user_prompt(["YOSEPH"])
         self.assertIn("query direction must not change", prompt)
