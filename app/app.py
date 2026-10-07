@@ -31,9 +31,18 @@ def env(name: str, default: str = "") -> str:
     return os.getenv(name, default).strip()
 
 
-CATALOG = env("NI_CATALOG")
-SCHEMA = env("NI_SCHEMA", "name_intelligence")
-VOLUME = env("NI_VOLUME", "files")
+def volume_coordinates(path: str) -> tuple[str, str, str]:
+    """Return catalog, schema, and volume from a Databricks UC volume path."""
+    parts = [part for part in path.strip().split("/") if part]
+    if len(parts) >= 4 and parts[0].casefold() == "volumes":
+        return parts[1], parts[2], parts[3]
+    return "", "", ""
+
+
+RESOURCE_CATALOG, RESOURCE_SCHEMA, RESOURCE_VOLUME = volume_coordinates(env("NI_VOLUME_PATH"))
+CATALOG = env("NI_CATALOG", RESOURCE_CATALOG)
+SCHEMA = env("NI_SCHEMA", RESOURCE_SCHEMA or "name_intelligence")
+VOLUME = env("NI_VOLUME", RESOURCE_VOLUME or "files")
 WAREHOUSE_ID = env("NI_WAREHOUSE_ID")
 ENDPOINT = env("NI_ENDPOINT")
 JOB_ID = env("NI_JOB_ID")
