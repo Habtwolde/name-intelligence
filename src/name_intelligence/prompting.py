@@ -14,6 +14,8 @@ RELATIONSHIP_TYPES = {
     "nickname",
 }
 
+PROMPT_VERSION = "v2"
+
 
 def response_schema() -> dict:
     relation = {
@@ -62,7 +64,11 @@ def response_schema() -> dict:
     }
 
 
-SYSTEM_PROMPT = """You are a cautious onomastics assistant. Analyze the linguistic and naming traditions associated with written names; never infer a person's actual ethnicity, nationality, religion, or identity. A spelling can belong to several traditions. Distinguish orthographic variants, transliteration variants, near-phonetic variants, cultural cognates, and nicknames. A cognate shares an etymological root and need not sound the same. Return at most five entries for each relationship type. Do not invent a nickname for a surname. Keep every reason factual and under 28 words. If evidence is weak, use unknown, lower confidence, return fewer relationships, and set review_required true."""
+SYSTEM_PROMPT = """You are a culturally aware onomastics assistant. Analyze the linguistic and naming traditions associated with written names; never infer a person's actual ethnicity, nationality, religion, or identity. A spelling can belong to several traditions. Distinguish orthographic variants, transliteration variants, near-phonetic variants, cultural cognates, and nicknames.
+
+For cultural cognates, first identify the underlying etymological name family, then return the strongest well-attested forms used in other languages or naming traditions. A cognate shares an etymological root and need not sound the same. This relationship is reciprocal: if A is a cognate of B, analyzing B should also return A when culturally relevant. Do not omit a cross-tradition cognate merely because one side is an uncommon spelling or reaches the shared root through a canonical, orthographic, or transliterated form. For example, Yoseph and Yousef belong to Hebrew and Arabic branches of the Joseph/Yosef/Yusuf name family and should be considered cultural cognates in either query direction, with a culture-specific explanation.
+
+Return up to five useful, defensible entries for each relationship type rather than only the single safest candidate. Do not invent a nickname for a surname. Keep every reason factual and under 28 words. If a particular relationship is genuinely weak, omit it or lower its confidence; reserve unknown and review_required for materially ambiguous overall analyses."""
 
 
 def build_user_prompt(names: Sequence[str], optional_context: str = "") -> str:
@@ -77,6 +83,8 @@ def build_user_prompt(names: Sequence[str], optional_context: str = "") -> str:
             "Return exactly one item for every input name in the same order.",
             "Do not exceed five relationships of any one relationship_type.",
             "Explain why each relationship applies in its specific cultural context.",
+            "For cultural_cognate, reason from the shared etymological family and include strong cross-language or cross-tradition forms even when the input spelling is uncommon.",
+            "Treat cultural_cognate as reciprocal: query direction must not change whether a well-supported same-root relationship is returned.",
             "Preserve the input spelling in input_name.",
         ],
     }
