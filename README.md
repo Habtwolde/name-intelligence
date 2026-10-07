@@ -12,7 +12,7 @@ follow-up questions, and never claims that a name proves a person's identity.
 - Uses Spark for ingestion, unpivoting, normalization and deduplication.
 - Sends only unresolved unique names to the model endpoint.
 - Batches up to 25 names per request to amortize prompt overhead.
-- Reuses exact results and high-confidence name-family members.
+- Reuses exact results and high-confidence name-family members only when the model endpoint and prompt version match.
 - Processes high-frequency names first and caps new names per run.
 - Saves every result, explanation, failure and model/prompt version in Delta.
 - Exports enriched row-level results back to the managed project volume.
@@ -52,7 +52,7 @@ does not permit one of these actions. The installer does not circumvent policy.
 | `target_catalog` | `AUTO` | Uses the notebook's current catalog. |
 | `target_schema` | `name_intelligence` | Created if missing. |
 | `warehouse_id` | `AUTO` | Selects an accessible running warehouse. |
-| `endpoint_name` | `AUTO` | Ranks ready chat/instruction endpoints, preferring economical names. |
+| `endpoint_name` | `databricks-meta-llama-3-3-70b-instruct` | Requires Databricks-hosted Meta Llama 3.3 70B Instruct. An existing `AUTO` widget value resolves to this endpoint. |
 | `auto_create_warehouse` | `false` | When enabled, creates a small serverless warehouse only if none exists. |
 | `batch_size` | `20` | Names per endpoint request; allowed range 1–25. |
 | `max_concurrent_requests` | `8` | Endpoint calls in flight. |
@@ -121,9 +121,10 @@ name-intelligence/
   million-row result into application memory.
 - Re-running an existing `run_id` replaces that run's staged rows and skips
   already-successful cached names.
-- Model endpoint availability and response dialects can differ by workspace.
-  If `AUTO` selects an incompatible endpoint, set `endpoint_name` in the
-  installer widget and rerun the installer; no source edit is required.
+- The app requires the Databricks-hosted `databricks-meta-llama-3-3-70b-instruct`
+  endpoint. The installer verifies access before changing the job or app deployment.
+- Prompt v2 treats well-supported cultural cognates as reciprocal and automatically
+  refreshes older cached analyses when a name is searched or processed again.
 - Names are personal data. Use appropriate workspace access, retention and
   client governance rules. Do not use name-tradition associations to make
   employment, eligibility, fraud, credit, healthcare or similar decisions.
