@@ -29,3 +29,11 @@ class PackageTests(unittest.TestCase):
         self.assertNotIn("azuredatabricks.net", text)
         self.assertNotIn("cloud.databricks.com", text)
         self.assertNotIn("dapi", text)
+
+    def test_llama_batch_has_safe_output_reservation_and_split_fallback(self):
+        pipeline = (ROOT / "notebooks/01_BATCH_NAME_PIPELINE.py").read_text(encoding="utf-8")
+        installer = (ROOT / "notebooks/00_RUN_ME_INSTALL_AND_DEPLOY.py").read_text(encoding="utf-8")
+        self.assertIn("min(8000", pipeline)
+        self.assertIn("def call_endpoint_once", pipeline)
+        self.assertIn("return call_endpoint(batch[:midpoint])", pipeline)
+        self.assertIn("MAX_CONCURRENCY = 1", installer)
