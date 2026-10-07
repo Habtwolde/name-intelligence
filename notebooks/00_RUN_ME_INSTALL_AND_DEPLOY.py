@@ -396,25 +396,6 @@ else:
     raise RuntimeError("The app identity was not provisioned within two minutes.")
 
 
-def update_permission(object_type: str, object_id: str, permission: str) -> None:
-    w.api_client.do(
-        "PATCH",
-        f"/api/2.0/permissions/{object_type}/{object_id}",
-        body={"access_control_list": [{
-            "service_principal_name": service_principal,
-            "permission_level": permission,
-        }]},
-    )
-
-
-update_permission("warehouses", WAREHOUSE_ID, "CAN_USE")
-endpoint = w.api_client.do("GET", f"/api/2.0/serving-endpoints/{ENDPOINT_NAME}")
-endpoint_id = endpoint.get("id")
-if not endpoint_id:
-    raise RuntimeError(f"Serving endpoint {ENDPOINT_NAME!r} did not return an ID.")
-update_permission("serving-endpoints", endpoint_id, "CAN_QUERY")
-update_permission("jobs", str(job_id), "CAN_MANAGE_RUN")
-
 principal = service_principal.replace("`", "``")
 grants = [
     f"GRANT USE CATALOG ON CATALOG `{TARGET_CATALOG}` TO `{principal}`",
