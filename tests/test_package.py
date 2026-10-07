@@ -37,3 +37,11 @@ class PackageTests(unittest.TestCase):
         self.assertIn("def call_endpoint_once", pipeline)
         self.assertIn("return call_endpoint(batch[:midpoint])", pipeline)
         self.assertIn("MAX_CONCURRENCY = 1", installer)
+
+    def test_app_configuration_uses_attached_resource_values(self):
+        manifest = (ROOT / "app.yaml").read_text(encoding="utf-8")
+        installer = (ROOT / "notebooks/00_RUN_ME_INSTALL_AND_DEPLOY.py").read_text(encoding="utf-8")
+        for resource_key in ["project-volume", "sql-warehouse", "serving-endpoint", "batch-job"]:
+            self.assertIn(f"valueFrom: {resource_key}", manifest)
+            self.assertIn(f'"name": "{resource_key}"', installer)
+        self.assertIn('"resources": app_resources', installer)
