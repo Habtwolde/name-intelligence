@@ -31,7 +31,8 @@ VOLUME_NAME = widget("volume_name", "files", "Managed volume")
 APP_NAME = widget("app_name", "name-intelligence-app", "Databricks App name")
 WAREHOUSE_ID = widget("warehouse_id", "AUTO", "SQL warehouse ID")
 REQUIRED_ENDPOINT_NAME = "databricks-meta-llama-3-3-70b-instruct"
-ENDPOINT_NAME = widget("endpoint_name", REQUIRED_ENDPOINT_NAME, "Llama 3.3 70B model serving endpoint")
+CONFIGURED_ENDPOINT_NAME = widget("endpoint_name", REQUIRED_ENDPOINT_NAME, "Llama 3.3 70B model serving endpoint")
+ENDPOINT_NAME = REQUIRED_ENDPOINT_NAME
 AUTO_CREATE_WAREHOUSE = widget("auto_create_warehouse", "false", "Create a small serverless warehouse if none exists").lower() == "true"
 WAREHOUSE_SIZE = widget("warehouse_size", "2X-Small", "New warehouse size")
 BATCH_SIZE = int(widget("batch_size", "20", "Names per LLM request"))
@@ -265,12 +266,10 @@ def verify_chat_endpoint(name: str) -> bool:
         return False
 
 
-if ENDPOINT_NAME.upper() == "AUTO":
-    ENDPOINT_NAME = REQUIRED_ENDPOINT_NAME
-if ENDPOINT_NAME != REQUIRED_ENDPOINT_NAME:
-    raise ValueError(
-        f"Name Intelligence requires the Llama 3.3 70B endpoint: {REQUIRED_ENDPOINT_NAME}. "
-        f"Received: {ENDPOINT_NAME}"
+if CONFIGURED_ENDPOINT_NAME != REQUIRED_ENDPOINT_NAME:
+    print(
+        f"Replacing legacy endpoint selection {CONFIGURED_ENDPOINT_NAME!r} with "
+        f"the required Llama 3.3 70B endpoint {REQUIRED_ENDPOINT_NAME!r}."
     )
 if not verify_chat_endpoint(ENDPOINT_NAME):
     raise RuntimeError(
