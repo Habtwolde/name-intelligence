@@ -388,7 +388,7 @@ deployment = w.api_client.do(
             {"name": "NI_VOLUME", "value": VOLUME_NAME},
             {"name": "NI_WAREHOUSE_ID", "value": WAREHOUSE_ID},
             {"name": "NI_ENDPOINT", "value": ENDPOINT_NAME},
-            {"name": "NI_PROMPT_VERSION", "value": "v2"},
+            {"name": "NI_PROMPT_VERSION", "value": "v3"},
             {"name": "NI_JOB_ID", "value": str(job_id)},
             {"name": "NI_BATCH_SIZE", "value": str(BATCH_SIZE)},
         ],
