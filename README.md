@@ -55,7 +55,7 @@ does not permit one of these actions. The installer does not circumvent policy.
 | `endpoint_name` | `databricks-meta-llama-3-3-70b-instruct` | Requires Databricks-hosted Meta Llama 3.3 70B Instruct. Any legacy widget value is migrated automatically. |
 | `auto_create_warehouse` | `false` | When enabled, creates a small serverless warehouse only if none exists. |
 | `batch_size` | `20` | Names per endpoint request; allowed range 1–25. |
-| `max_concurrent_requests` | `8` | Endpoint calls in flight. |
+| `max_concurrent_requests` | `1` | Llama-safe endpoint calls in flight; legacy higher widget values are reduced automatically. |
 | `max_new_names_per_run` | `100000` | Cost circuit breaker. |
 | `run_acceptance_test` | `true` | Runs the included 30-row test file. |
 
@@ -76,7 +76,7 @@ The pipeline never invokes the LLM for all `R` rows. It also:
 
 - Orders unresolved names by source frequency.
 - Stops at the configured new-name ceiling.
-- Retries transient endpoint failures up to four times.
+- Caps Llama output-token reservations, uses one in-flight request, and automatically splits a batch when a complete JSON response does not fit.
 - Flushes results incrementally so an interruption does not discard completed work.
 - Reuses family templates only for members recorded at confidence 0.85 or higher.
 - Generates short stored rationales once; follow-up chat is invoked only on demand.
