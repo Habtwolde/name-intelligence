@@ -331,13 +331,60 @@ print(f"Batch job ID: {job_id}")
 # MAGIC ## Create the app, grant its identity access, and deploy
 
 # COMMAND ----------
+app_resources = [
+    {
+        "name": "sql-warehouse",
+        "description": "Warehouse used by the app",
+        "sql_warehouse": {"id": WAREHOUSE_ID, "permission": "CAN_USE"},
+    },
+    {
+        "name": "serving-endpoint",
+        "description": "Llama endpoint used by the app",
+        "serving_endpoint": {"name": ENDPOINT_NAME, "permission": "CAN_QUERY"},
+    },
+    {
+        "name": "batch-job",
+        "description": "Scalable name enrichment job",
+        "job": {"id": str(job_id), "permission": "CAN_MANAGE_RUN"},
+    },
+    {
+        "name": "project-volume",
+        "description": "Uploads and exports volume",
+        "uc_securable": {
+            "securable_full_name": f"{TARGET_CATALOG}.{TARGET_SCHEMA}.{VOLUME_NAME}",
+            "securable_type": "VOLUME",
+            "permission": "WRITE_VOLUME",
+        },
+    },
+]
+app_description = "Scalable, culturally aware linguistic name analysis"
+
 try:
     app = w.api_client.do("GET", f"/api/2.0/apps/{APP_NAME}")
 except Exception:
     app = w.api_client.do("POST", "/api/2.0/apps", body={
         "name": APP_NAME,
-        "description": "Scalable, culturally aware linguistic name analysis",
+        "description": app_description,
+        "resources": app_resources,
     })
+else:
+    w.api_client.do(
+        "POST",
+        f"/api/2.0/apps/{APP_NAME}/update",
+        body={"app": {
+            "name": APP_NAME,
+            "description": app_description,
+            "resources": app_resources,
+        }},
+    )
+    for _ in range(120):
+        update_status = w.api_client.do("GET", f"/api/2.0/apps/{APP_NAME}/update")
+        update_state = str(update_status.get("status", {}).get("state", "")).upper()
+        if update_state in {"SUCCEEDED", "FAILED"}:
+            break
+        time.sleep(2)
+    if update_state != "SUCCEEDED":
+        raise RuntimeError(f"App resource update failed: {json.dumps(update_status, default=str)}")
 
 for _ in range(60):
     app = w.api_client.do("GET", f"/api/2.0/apps/{APP_NAME}")
@@ -349,37 +396,30 @@ else:
     raise RuntimeError("The app identity was not provisioned within two minutes.")
 
 
-# Attach dependent services as Databricks App Resources. Databricks grants the
-# app service principal the requested least-privilege access. This works for
-# custom/provisioned endpoints and managed pay-per-token foundation endpoints.
-app_resources = [
-    {
-        "name": "sql-warehouse",
-        "description": "Warehouse used by Name Intelligence",
-        "sql_warehouse": {"id": WAREHOUSE_ID, "permission": "CAN_USE"},
-    },
-    {
-        "name": "serving-endpoint",
-        "description": "LLM endpoint used for name analysis",
-        "serving_endpoint": {"name": ENDPOINT_NAME, "permission": "CAN_QUERY"},
-    },
-    {
-        "name": "batch-job",
-        "description": "Batch name enrichment job",
-        "job": {"id": str(job_id), "permission": "CAN_MANAGE_RUN"},
-    },
-]
-w.api_client.do(
-    "PATCH",
-    f"/api/2.0/apps/{APP_NAME}",
-    body={"resources": app_resources},
-)
+def update_permission(object_type: str, object_id: str, permission: str) -> None:
+    w.api_client.do(
+        "PATCH",
+        f"/api/2.0/permissions/{object_type}/{object_id}",
+        body={"access_control_list": [{
+            "service_principal_name": service_principal,
+            "permission_level": permission,
+        }]},
+    )
+
+
+update_permission("warehouses", WAREHOUSE_ID, "CAN_USE")
+endpoint = w.api_client.do("GET", f"/api/2.0/serving-endpoints/{ENDPOINT_NAME}")
+endpoint_id = endpoint.get("id")
+if not endpoint_id:
+    raise RuntimeError(f"Serving endpoint {ENDPOINT_NAME!r} did not return an ID.")
+update_permission("serving-endpoints", endpoint_id, "CAN_QUERY")
+update_permission("jobs", str(job_id), "CAN_MANAGE_RUN")
 
 principal = service_principal.replace("`", "``")
 grants = [
     f"GRANT USE CATALOG ON CATALOG `{TARGET_CATALOG}` TO `{principal}`",
     f"GRANT USE SCHEMA ON SCHEMA `{TARGET_CATALOG}`.`{TARGET_SCHEMA}` TO `{principal}`",
-    f"GRANT SELECT, MODIFY ON SCHEMA `{TARGET_CATALOG}`.`{TARGET_SCHEMA}` TO `{principal}`",
+    f"GRANT SELECT, MODIFY ON ALL TABLES IN SCHEMA `{TARGET_CATALOG}`.`{TARGET_SCHEMA}` TO `{principal}`",
     f"GRANT READ VOLUME, WRITE VOLUME ON VOLUME `{TARGET_CATALOG}`.`{TARGET_SCHEMA}`.`{VOLUME_NAME}` TO `{principal}`",
 ]
 for statement in grants:
@@ -391,16 +431,6 @@ deployment = w.api_client.do(
     body={
         "source_code_path": workspace_source_root,
         "mode": "SNAPSHOT",
-        "env_vars": [
-            {"name": "NI_CATALOG", "value": TARGET_CATALOG},
-            {"name": "NI_SCHEMA", "value": TARGET_SCHEMA},
-            {"name": "NI_VOLUME", "value": VOLUME_NAME},
-            {"name": "NI_WAREHOUSE_ID", "value": WAREHOUSE_ID},
-            {"name": "NI_ENDPOINT", "value": ENDPOINT_NAME},
-            {"name": "NI_PROMPT_VERSION", "value": "v3"},
-            {"name": "NI_JOB_ID", "value": str(job_id)},
-            {"name": "NI_BATCH_SIZE", "value": str(BATCH_SIZE)},
-        ],
     },
 )
 deployment_id = deployment.get("deployment_id")
