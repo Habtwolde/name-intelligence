@@ -346,7 +346,7 @@ with dashboard_tab:
             st.caption("Distribution of name-tradition associations, not people by culture.")
             st.bar_chart(traditions.set_index("primary_name_tradition"))
         recent = query_frame(
-            f"SELECT run_id, status, source_rows, unique_names, processed_names, failed_names, updated_at "
+            f"SELECT run_id, status, source_rows, unique_names, processed_names, failed_names, error_message, updated_at "
             f"FROM `{CATALOG}`.`{SCHEMA}`.`analysis_runs` ORDER BY updated_at DESC LIMIT 25"
         )
         st.dataframe(recent, use_container_width=True, hide_index=True)
@@ -354,7 +354,7 @@ with dashboard_tab:
             chosen_run = st.selectbox("Inspect a completed run", recent["run_id"].astype(str).tolist())
             preview = query_frame(
                 f"SELECT s.source_column, s.original_name, s.normalized_name, a.primary_name_tradition, "
-                f"a.confidence, a.review_required, a.response_json FROM `{CATALOG}`.`{SCHEMA}`.`source_name_values` s "
+                f"a.confidence, a.review_required, a.error_message, a.response_json FROM `{CATALOG}`.`{SCHEMA}`.`source_name_values` s "
                 f"LEFT JOIN `{CATALOG}`.`{SCHEMA}`.`name_analysis_cache` a USING (name_hash) "
                 "WHERE s.run_id = ? LIMIT 50000",
                 [chosen_run],
