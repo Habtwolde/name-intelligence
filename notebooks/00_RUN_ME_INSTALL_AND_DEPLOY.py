@@ -30,7 +30,8 @@ TARGET_SCHEMA = widget("target_schema", "name_intelligence", "Target schema")
 VOLUME_NAME = widget("volume_name", "files", "Managed volume")
 APP_NAME = widget("app_name", "name-intelligence-app", "Databricks App name")
 WAREHOUSE_ID = widget("warehouse_id", "AUTO", "SQL warehouse ID")
-ENDPOINT_NAME = widget("endpoint_name", "AUTO", "Model serving endpoint")
+REQUIRED_ENDPOINT_NAME = "databricks-meta-llama-3-3-70b-instruct"
+ENDPOINT_NAME = widget("endpoint_name", REQUIRED_ENDPOINT_NAME, "Llama 3.3 70B model serving endpoint")
 AUTO_CREATE_WAREHOUSE = widget("auto_create_warehouse", "false", "Create a small serverless warehouse if none exists").lower() == "true"
 WAREHOUSE_SIZE = widget("warehouse_size", "2X-Small", "New warehouse size")
 BATCH_SIZE = int(widget("batch_size", "20", "Names per LLM request"))
@@ -248,15 +249,6 @@ if WAREHOUSE_ID.upper() == "AUTO":
         raise RuntimeError("No accessible SQL warehouse was found. Rerun with auto_create_warehouse=true or provide warehouse_id.")
 
 
-endpoints = list(w.serving_endpoints.list())
-def endpoint_score(item):
-    name = str(getattr(item, "name", "")).lower()
-    ready = "READY" in state_value(getattr(getattr(item, "state", None), "ready", ""))
-    economy = any(token in name for token in ["mini", "small", "8b", "haiku", "flash"])
-    instruction = any(token in name for token in ["instruct", "chat", "gpt", "claude", "llama", "command"])
-    return (not ready, not instruction, not economy, name)
-
-
 def verify_chat_endpoint(name: str) -> bool:
     try:
         response = w.api_client.do(
@@ -274,15 +266,17 @@ def verify_chat_endpoint(name: str) -> bool:
 
 
 if ENDPOINT_NAME.upper() == "AUTO":
-    ranked_endpoints = sorted(endpoints, key=endpoint_score)
-    ENDPOINT_NAME = next(
-        (candidate.name for candidate in ranked_endpoints[:10] if verify_chat_endpoint(candidate.name)),
-        "",
+    ENDPOINT_NAME = REQUIRED_ENDPOINT_NAME
+if ENDPOINT_NAME != REQUIRED_ENDPOINT_NAME:
+    raise ValueError(
+        f"Name Intelligence requires the Llama 3.3 70B endpoint: {REQUIRED_ENDPOINT_NAME}. "
+        f"Received: {ENDPOINT_NAME}"
     )
-    if not ENDPOINT_NAME:
-        raise RuntimeError("No accessible chat/instruction model endpoint passed the automatic compatibility probe.")
-elif not verify_chat_endpoint(ENDPOINT_NAME):
-    raise RuntimeError(f"Configured endpoint '{ENDPOINT_NAME}' did not accept a chat-completions request.")
+if not verify_chat_endpoint(ENDPOINT_NAME):
+    raise RuntimeError(
+        f"Required endpoint '{ENDPOINT_NAME}' did not accept a chat-completions request. "
+        "Confirm that Meta Llama 3.3 70B Instruct is available in this workspace region."
+    )
 
 print(f"Selected warehouse: {WAREHOUSE_ID}")
 print(f"Selected endpoint: {ENDPOINT_NAME}")
@@ -395,6 +389,7 @@ deployment = w.api_client.do(
             {"name": "NI_VOLUME", "value": VOLUME_NAME},
             {"name": "NI_WAREHOUSE_ID", "value": WAREHOUSE_ID},
             {"name": "NI_ENDPOINT", "value": ENDPOINT_NAME},
+            {"name": "NI_PROMPT_VERSION", "value": "v2"},
             {"name": "NI_JOB_ID", "value": str(job_id)},
             {"name": "NI_BATCH_SIZE", "value": str(BATCH_SIZE)},
         ],
