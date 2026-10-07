@@ -375,7 +375,7 @@ else:
             "name": APP_NAME,
             "description": app_description,
             "resources": app_resources,
-        }},
+        }, "update_mask": "description,resources"},
     )
     for _ in range(120):
         update_status = w.api_client.do("GET", f"/api/2.0/apps/{APP_NAME}/update")
