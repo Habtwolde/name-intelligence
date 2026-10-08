@@ -223,6 +223,114 @@ def render_relationships(result: dict) -> None:
             )
 
 
+def render_csv_dashboard(run_id: str) -> None:
+    """Render customer-facing results for one uploaded CSV."""
+    run = query_frame(
+        f"SELECT run_id, status, source_rows, unique_names, new_names, cached_names, "
+        f"processed_names, failed_names, updated_at, error_message "
+        f"FROM `{CATALOG}`.`{SCHEMA}`.`analysis_runs` WHERE run_id = ?",
+        [run_id],
+    )
+    if run.empty:
+        st.info("This CSV run is initializing. Refresh the page shortly.")
+        return
+
+    row = run.iloc[0]
+    st.markdown("### CSV analysis dashboard")
+    st.caption(f"Run {run_id} · status: {row['status']} · updated {row['updated_at']}")
+    metrics = st.columns(4)
+    metrics[0].metric("Source rows", int(row["source_rows"] or 0))
+    metrics[1].metric("Unique names", int(row["unique_names"] or 0))
+    metrics[2].metric("Analyzed", int(row["processed_names"] or 0))
+    metrics[3].metric("Failed", int(row["failed_names"] or 0))
+    cache_metrics = st.columns(2)
+    cache_metrics[0].metric("New names", int(row["new_names"] or 0))
+    cache_metrics[1].metric("Reused from cache", int(row["cached_names"] or 0))
+    if row.get("error_message"):
+        st.error(str(row["error_message"]))
+
+    traditions = query_frame(
+        f"""
+        WITH run_names AS (
+          SELECT DISTINCT name_hash FROM `{CATALOG}`.`{SCHEMA}`.`source_name_values` WHERE run_id = ?
+        )
+        SELECT coalesce(a.primary_name_tradition, 'Pending') AS name_tradition,
+               count(*) AS unique_names
+        FROM run_names r LEFT JOIN `{CATALOG}`.`{SCHEMA}`.`name_analysis_cache` a USING (name_hash)
+        GROUP BY coalesce(a.primary_name_tradition, 'Pending')
+        ORDER BY unique_names DESC LIMIT 25
+        """,
+        [run_id],
+    )
+    if not traditions.empty:
+        st.caption("Name-tradition associations in this CSV—not the identity of the people named.")
+        st.bar_chart(traditions.set_index("name_tradition"))
+
+    relationship_labels = {
+        "orthographic_variant": "Spelling variants",
+        "transliteration_variant": "Transliterations",
+        "phonetic_variant": "Phonetic variants",
+        "cultural_cognate": "Cultural cognates",
+        "nickname": "Nicknames",
+    }
+    result_tabs = st.tabs(["Name analysis", *relationship_labels.values()])
+
+    with result_tabs[0]:
+        analysis = query_frame(
+            f"""
+            SELECT s.normalized_name AS name, count(*) AS occurrences,
+                   a.primary_name_tradition, a.confidence, a.review_required,
+                   get_json_object(a.response_json, '$.name_form') AS likely_form,
+                   get_json_object(a.response_json, '$.summary') AS summary,
+                   get_json_object(a.response_json, '$.ambiguity_note') AS ambiguity_note
+            FROM `{CATALOG}`.`{SCHEMA}`.`source_name_values` s
+            LEFT JOIN `{CATALOG}`.`{SCHEMA}`.`name_analysis_cache` a USING (name_hash)
+            WHERE s.run_id = ?
+            GROUP BY s.normalized_name, a.primary_name_tradition, a.confidence,
+                     a.review_required, a.response_json
+            ORDER BY occurrences DESC, name LIMIT 50000
+            """,
+            [run_id],
+        )
+        st.dataframe(analysis, use_container_width=True, hide_index=True)
+        st.download_button(
+            "Download name analysis table",
+            data=analysis.to_csv(index=False).encode("utf-8-sig"),
+            file_name=f"name_analysis_{run_id}.csv",
+            mime="text/csv",
+        )
+
+    for panel, relationship_type in zip(result_tabs[1:], relationship_labels):
+        label = relationship_labels[relationship_type]
+        with panel:
+            relationships = query_frame(
+                f"""
+                WITH run_names AS (
+                  SELECT DISTINCT name_hash, normalized_name
+                  FROM `{CATALOG}`.`{SCHEMA}`.`source_name_values` WHERE run_id = ?
+                )
+                SELECT r.normalized_name AS input_name, n.related_name,
+                       n.cultural_context, n.why, n.confidence
+                FROM run_names r
+                INNER JOIN `{CATALOG}`.`{SCHEMA}`.`name_relationships` n USING (name_hash)
+                WHERE n.relationship_type = ?
+                ORDER BY input_name, n.confidence DESC LIMIT 50000
+                """,
+                [run_id, relationship_type],
+            )
+            if relationships.empty:
+                st.info(f"No {label.lower()} were returned for this CSV.")
+            else:
+                st.dataframe(relationships, use_container_width=True, hide_index=True)
+                st.download_button(
+                    f"Download {label.lower()}",
+                    data=relationships.to_csv(index=False).encode("utf-8-sig"),
+                    file_name=f"{relationship_type}_{run_id}.csv",
+                    mime="text/csv",
+                    key=f"download_{relationship_type}_{run_id}",
+                )
+
+
 def configuration_ready() -> bool:
     missing = [
         name
@@ -248,9 +356,7 @@ st.caption("Linguistic name traditions and culturally aware relationships — no
 if not configuration_ready():
     st.stop()
 
-batch_tab, single_tab, why_tab, dashboard_tab = st.tabs(
-    ["Batch analyzer", "Single name", "Ask why", "Dashboard"]
-)
+batch_tab, single_tab, why_tab = st.tabs(["CSV analyzer & dashboard", "Single name", "Ask why"])
 
 with batch_tab:
     st.subheader("Analyze a CSV")
@@ -281,17 +387,27 @@ with batch_tab:
             st.session_state["latest_run_id"] = run_id
             st.caption(f"Databricks job run: {job_run_id}")
 
-    latest_run = st.session_state.get("latest_run_id")
-    if latest_run:
-        try:
-            status = query_frame(
-                f"SELECT run_id, status, source_rows, unique_names, new_names, cached_names, processed_names, failed_names, updated_at "
-                f"FROM `{CATALOG}`.`{SCHEMA}`.`analysis_runs` WHERE run_id = ?",
-                [latest_run],
+    try:
+        recent_runs = query_frame(
+            f"SELECT run_id, status, updated_at FROM `{CATALOG}`.`{SCHEMA}`.`analysis_runs` "
+            "ORDER BY updated_at DESC LIMIT 25"
+        )
+        if recent_runs.empty:
+            st.info("Upload a CSV to create the first analysis dashboard.")
+        else:
+            run_ids = recent_runs["run_id"].astype(str).tolist()
+            preferred = st.session_state.get("latest_run_id")
+            selected_index = run_ids.index(preferred) if preferred in run_ids else 0
+            status_by_run = dict(zip(run_ids, recent_runs["status"].astype(str)))
+            selected_run = st.selectbox(
+                "CSV analysis run",
+                run_ids,
+                index=selected_index,
+                format_func=lambda value: f"{value} · {status_by_run[value]}",
             )
-            st.dataframe(status, use_container_width=True, hide_index=True)
-        except Exception as exc:
-            st.info(f"The run is initializing: {exc}")
+            render_csv_dashboard(selected_run)
+    except Exception as exc:
+        st.info(f"The CSV dashboard is initializing: {exc}")
 
 with single_tab:
     st.subheader("Explore one name")
@@ -367,52 +483,3 @@ with why_tab:
                 },
             )
             st.write(response["choices"][0]["message"]["content"])
-
-with dashboard_tab:
-    st.subheader("Processing overview")
-    try:
-        summary = query_frame(
-            f"SELECT count(*) AS analyzed_names, "
-            f"sum(CASE WHEN review_required THEN 1 ELSE 0 END) AS review_required, "
-            f"avg(confidence) AS average_confidence "
-            f"FROM `{CATALOG}`.`{SCHEMA}`.`name_analysis_cache` WHERE status = 'SUCCESS'"
-        )
-        if not summary.empty:
-            a, b, c = st.columns(3)
-            a.metric("Analyzed names", int(summary.iloc[0]["analyzed_names"] or 0))
-            b.metric("Needs review", int(summary.iloc[0]["review_required"] or 0))
-            c.metric("Average confidence", f"{float(summary.iloc[0]['average_confidence'] or 0):.0%}")
-        traditions = query_frame(
-            f"SELECT primary_name_tradition, count(*) AS names FROM `{CATALOG}`.`{SCHEMA}`.`name_analysis_cache` "
-            f"WHERE status = 'SUCCESS' GROUP BY primary_name_tradition ORDER BY names DESC LIMIT 20"
-        )
-        if not traditions.empty:
-            st.caption("Distribution of name-tradition associations, not people by culture.")
-            st.bar_chart(traditions.set_index("primary_name_tradition"))
-        recent = query_frame(
-            f"SELECT run_id, status, source_rows, unique_names, processed_names, failed_names, error_message, updated_at "
-            f"FROM `{CATALOG}`.`{SCHEMA}`.`analysis_runs` ORDER BY updated_at DESC LIMIT 25"
-        )
-        st.dataframe(recent, use_container_width=True, hide_index=True)
-        if not recent.empty:
-            chosen_run = st.selectbox("Inspect a completed run", recent["run_id"].astype(str).tolist())
-            preview = query_frame(
-                f"SELECT s.source_column, s.original_name, s.normalized_name, a.primary_name_tradition, "
-                f"a.confidence, a.review_required, a.error_message, a.response_json FROM `{CATALOG}`.`{SCHEMA}`.`source_name_values` s "
-                f"LEFT JOIN `{CATALOG}`.`{SCHEMA}`.`name_analysis_cache` a USING (name_hash) "
-                "WHERE s.run_id = ? LIMIT 50000",
-                [chosen_run],
-            )
-            st.dataframe(preview.head(500), use_container_width=True, hide_index=True)
-            st.download_button(
-                "Download up to 50,000 displayed-run values",
-                data=preview.to_csv(index=False).encode("utf-8-sig"),
-                file_name=f"name_intelligence_{chosen_run}.csv",
-                mime="text/csv",
-            )
-            st.caption(
-                f"The complete partitioned export is stored at "
-                f"/Volumes/{CATALOG}/{SCHEMA}/{VOLUME}/exports/{chosen_run}."
-            )
-    except Exception as exc:
-        st.warning(f"Dashboard data is not available yet: {exc}")
