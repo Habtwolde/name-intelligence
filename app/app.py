@@ -236,18 +236,34 @@ def render_csv_dashboard(run_id: str) -> None:
         return
 
     row = run.iloc[0]
-    st.markdown("### CSV analysis dashboard")
-    st.caption(f"Run {run_id} · status: {row['status']} · updated {row['updated_at']}")
-    metrics = st.columns(4)
-    metrics[0].metric("Source rows", int(row["source_rows"] or 0))
+    st.markdown("### Name intelligence results")
+    if str(row["status"]).upper() not in {"COMPLETED", "SUCCESS"}:
+        st.info(
+            f"Analysis is still processing: {int(row['processed_names'] or 0)} of "
+            f"{int(row['unique_names'] or 0)} unique names completed."
+        )
+
+    customer_summary = query_frame(
+        f"""
+        WITH run_names AS (
+          SELECT DISTINCT name_hash FROM `{CATALOG}`.`{SCHEMA}`.`source_name_values` WHERE run_id = ?
+        )
+        SELECT count(DISTINCT a.primary_name_tradition) AS cultures,
+               count(DISTINCT CASE WHEN n.relationship_type = 'cultural_cognate' THEN r.name_hash END) AS with_cognates,
+               count(DISTINCT CASE WHEN n.relationship_type = 'nickname' THEN r.name_hash END) AS with_nicknames
+        FROM run_names r
+        LEFT JOIN `{CATALOG}`.`{SCHEMA}`.`name_analysis_cache` a USING (name_hash)
+        LEFT JOIN `{CATALOG}`.`{SCHEMA}`.`name_relationships` n USING (name_hash)
+        """,
+        [run_id],
+    )
+    summary_row = customer_summary.iloc[0] if not customer_summary.empty else {}
+    metrics = st.columns(5)
+    metrics[0].metric("CSV rows", int(row["source_rows"] or 0))
     metrics[1].metric("Unique names", int(row["unique_names"] or 0))
-    metrics[2].metric("Analyzed", int(row["processed_names"] or 0))
-    metrics[3].metric("Failed", int(row["failed_names"] or 0))
-    cache_metrics = st.columns(2)
-    cache_metrics[0].metric("New names", int(row["new_names"] or 0))
-    cache_metrics[1].metric("Reused from cache", int(row["cached_names"] or 0))
-    if row.get("error_message"):
-        st.error(str(row["error_message"]))
+    metrics[2].metric("Cultures identified", int(summary_row.get("cultures", 0) or 0))
+    metrics[3].metric("Names with cognates", int(summary_row.get("with_cognates", 0) or 0))
+    metrics[4].metric("Names with nicknames", int(summary_row.get("with_nicknames", 0) or 0))
 
     traditions = query_frame(
         f"""
@@ -278,17 +294,34 @@ def render_csv_dashboard(run_id: str) -> None:
     with result_tabs[0]:
         analysis = query_frame(
             f"""
-            SELECT s.normalized_name AS name, count(*) AS occurrences,
-                   a.primary_name_tradition, a.confidence, a.review_required,
-                   get_json_object(a.response_json, '$.name_form') AS likely_form,
-                   get_json_object(a.response_json, '$.summary') AS summary,
-                   get_json_object(a.response_json, '$.ambiguity_note') AS ambiguity_note
-            FROM `{CATALOG}`.`{SCHEMA}`.`source_name_values` s
+            WITH run_names AS (
+              SELECT DISTINCT name_hash, normalized_name
+              FROM `{CATALOG}`.`{SCHEMA}`.`source_name_values` WHERE run_id = ?
+            ), relationship_rollup AS (
+              SELECT name_hash,
+                concat_ws(', ', sort_array(collect_set(CASE WHEN relationship_type = 'orthographic_variant' THEN related_name END))) AS spelling_variants,
+                concat_ws(', ', sort_array(collect_set(CASE WHEN relationship_type = 'transliteration_variant' THEN related_name END))) AS transliterations,
+                concat_ws(', ', sort_array(collect_set(CASE WHEN relationship_type = 'phonetic_variant' THEN related_name END))) AS phonetic_variants,
+                concat_ws(', ', sort_array(collect_set(CASE WHEN relationship_type = 'cultural_cognate' THEN related_name END))) AS cultural_cognates,
+                concat_ws(', ', sort_array(collect_set(CASE WHEN relationship_type = 'nickname' THEN related_name END))) AS nicknames
+              FROM `{CATALOG}`.`{SCHEMA}`.`name_relationships`
+              GROUP BY name_hash
+            )
+            SELECT s.normalized_name AS `Name`,
+                   a.primary_name_tradition AS `Culture`,
+                   concat_ws(', ', from_json(
+                     get_json_object(a.response_json, '$.other_possible_traditions'), 'array<string>'
+                   )) AS `Other possible cultures`,
+                   get_json_object(a.response_json, '$.summary') AS `Cultural summary`,
+                   coalesce(r.spelling_variants, '') AS `Spelling variants`,
+                   coalesce(r.transliterations, '') AS `Transliterations`,
+                   coalesce(r.phonetic_variants, '') AS `Phonetic variants`,
+                   coalesce(r.cultural_cognates, '') AS `Cultural cognates`,
+                   coalesce(r.nicknames, '') AS `Nicknames`
+            FROM run_names s
             LEFT JOIN `{CATALOG}`.`{SCHEMA}`.`name_analysis_cache` a USING (name_hash)
-            WHERE s.run_id = ?
-            GROUP BY s.normalized_name, a.primary_name_tradition, a.confidence,
-                     a.review_required, a.response_json
-            ORDER BY occurrences DESC, name LIMIT 50000
+            LEFT JOIN relationship_rollup r USING (name_hash)
+            ORDER BY `Name` LIMIT 50000
             """,
             [run_id],
         )
@@ -388,24 +421,21 @@ with batch_tab:
             st.caption(f"Databricks job run: {job_run_id}")
 
     try:
-        recent_runs = query_frame(
-            f"SELECT run_id, status, updated_at FROM `{CATALOG}`.`{SCHEMA}`.`analysis_runs` "
-            "ORDER BY updated_at DESC LIMIT 25"
-        )
-        if recent_runs.empty:
-            st.info("Upload a CSV to create the first analysis dashboard.")
-        else:
-            run_ids = recent_runs["run_id"].astype(str).tolist()
-            preferred = st.session_state.get("latest_run_id")
-            selected_index = run_ids.index(preferred) if preferred in run_ids else 0
-            status_by_run = dict(zip(run_ids, recent_runs["status"].astype(str)))
-            selected_run = st.selectbox(
-                "CSV analysis run",
-                run_ids,
-                index=selected_index,
-                format_func=lambda value: f"{value} · {status_by_run[value]}",
+        preferred = st.session_state.get("latest_run_id")
+        if preferred:
+            recent_runs = query_frame(
+                f"SELECT run_id FROM `{CATALOG}`.`{SCHEMA}`.`analysis_runs` WHERE run_id = ? LIMIT 1",
+                [preferred],
             )
-            render_csv_dashboard(selected_run)
+        else:
+            recent_runs = query_frame(
+                f"SELECT run_id FROM `{CATALOG}`.`{SCHEMA}`.`analysis_runs` "
+                "WHERE run_id NOT LIKE 'acceptance-%' ORDER BY updated_at DESC LIMIT 1"
+            )
+        if recent_runs.empty:
+            st.info("Upload a CSV to create the name intelligence results.")
+        else:
+            render_csv_dashboard(str(recent_runs.iloc[0]["run_id"]))
     except Exception as exc:
         st.info(f"The CSV dashboard is initializing: {exc}")
 
